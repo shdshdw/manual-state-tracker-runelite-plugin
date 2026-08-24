@@ -33,8 +33,11 @@ import com.sordanow.manualstatetracker.image.GameIconCatalogue;
 import com.sordanow.manualstatetracker.image.GameIconLoader;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -52,11 +55,11 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.DynamicGridLayout;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
-import net.runelite.client.util.LinkBrowser;
 
 /**
  * The plugin's side panel: pick the active state set, edit the sets themselves, and edit the states
@@ -68,6 +71,7 @@ import net.runelite.client.util.LinkBrowser;
  *
  * <p>All methods run on the Swing thread unless noted; disk work is handed to the executor.</p>
  */
+@Slf4j
 @Singleton
 public class ManualStateTrackerPanel extends PluginPanel
 {
@@ -546,19 +550,55 @@ public class ManualStateTrackerPanel extends PluginPanel
 		final JLabel hint = hint("Custom images are PNGs in the plugin's image folder. Overlay size, opacity and the cycle hotkeys live in the plugin's config.");
 		panel.add(hint);
 
-		final JButton openFolder = button("Open image folder", imageStore.getImageDirectory().toString(), () ->
+		final JButton copyFolder = button("Copy image folder path", imageStore.getImageDirectory().toString(), () ->
 			executor.execute(() ->
 			{
-				final java.nio.file.Path directory = imageStore.ensureImageDirectory();
+				final Path directory = imageStore.ensureImageDirectory();
 
-				if (directory != null)
-				{
-					LinkBrowser.open(directory.toString());
-				}
+				SwingUtilities.invokeLater(() -> copyFolderPathToClipboard(directory));
 			}));
-		panel.add(openFolder);
+		panel.add(copyFolder);
 
 		return panel;
+	}
+
+	/**
+	 * Puts the image folder's path on the system clipboard so the user can paste it into their own
+	 * file manager.
+	 */
+	private void copyFolderPathToClipboard(@Nullable Path directory)
+	{
+		if (directory == null)
+		{
+			JOptionPane.showMessageDialog(this,
+				"Could not create the plugin's image folder.",
+				"Image folder unavailable", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		final String path = directory.toAbsolutePath().toString();
+
+		try
+		{
+			Toolkit.getDefaultToolkit().getSystemClipboard()
+				.setContents(new StringSelection(path), null);
+		}
+		catch (IllegalStateException e)
+		{
+			// Another application can hold the system clipboard; show the path so the user can
+			// still read it off the dialog.
+			log.debug("Could not access the system clipboard", e);
+
+			JOptionPane.showMessageDialog(this,
+				"The clipboard was unavailable. The image folder is:\n" + path,
+				"Image folder", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+
+		// JOptionPane only breaks lines on \n, so never use System.lineSeparator() here.
+		JOptionPane.showMessageDialog(this,
+			"Copied to your clipboard:\n" + path,
+			"Image folder", JOptionPane.INFORMATION_MESSAGE);
 	}
 
 	private static JButton button(String text, String tooltip, Runnable action)
